@@ -73,6 +73,22 @@ st.markdown("""
   margin: 8px 0 4px 0;
   font-size: 1.15rem;
 }
+
+/* bąble czatu */
+.chat-bubble{
+  border:1px solid #d9dfe5; padding:10px 12px; border-radius:12px; margin-bottom:8px;
+}
+.sender{ color:#334155; font-weight:600; margin-right:6px; }
+.typing-cursor::after{ content:'▌'; animation: blink 1s steps(1) infinite; }
+@keyframes blink{ 50%{ opacity:0; } }
+
+/* paleta kolorów dla ćwiczeń */
+.stage-1 { background:#eef6ff; }
+.stage-2 { background:#f1f7ee; }
+.stage-3 { background:#fff6ec; }
+.stage-4 { background:#f5f0ff; }
+.stage-5 { background:#fef2f2; }
+.test    { background:#f4f6f8; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -131,7 +147,7 @@ if "selected_theory" not in st.session_state: st.session_state.selected_theory =
 
 # ROTACJA IMION TUTORA
 if "tutor_names" not in st.session_state:
-    st.session_state.tutor_names = ["Mario", "Lucía", "Carlos", "Sofía", "Diego", "Ana"]
+    st.session_state.tutor_names = ["Mario", "Lucía", "Carlos", "Sofía", "Diego", "Ana", "Marco"]
 if "tutor_idx" not in st.session_state:
     st.session_state.tutor_idx = 0
 if "tutor_name" not in st.session_state:
@@ -141,38 +157,85 @@ def rotate_tutor_name():
     st.session_state.tutor_idx = (st.session_state.tutor_idx + 1) % len(st.session_state.tutor_names)
     st.session_state.tutor_name = st.session_state.tutor_names[st.session_state.tutor_idx]
 
-# ====== DODANE: imię tutora zależne od ćwiczenia ======
-TUTOR_BY_STAGE = {
-    1: "Mario",
-    2: "Lucía",
-    3: "Carlos",
-    4: "Sofía",
-    5: "Diego",
-}
+# ====== Imię tutora zależne od ćwiczenia ======
+TUTOR_BY_STAGE = {1:"Marco", 2:"Lucía", 3:"Carlos", 4:"Sofía", 5:"Diego"}
 def set_tutor_for_stage(stage: int):
     st.session_state.tutor_name = TUTOR_BY_STAGE.get(stage, st.session_state.tutor_names[0])
-# ======================================================
+
+# ====== „Recenzent” – 3. chatbot (działa w tle) ======
+def review_message(role: str, text: str) -> str:
+    """
+    Minimalny strażnik merytoryki:
+    - doprecyzowuje nazwy czasów w ćw.1 (Simple vs Compuesto),
+    - poprawia drobne literówki markerów (ultimamente -> últimamente),
+    - wygładza sformułowania feedbacku.
+    """
+    if st.session_state.stage == 1 and role in ("asystent", "mario"):
+        if "Perfecto" in text and "Compuesto" not in text and "Simple" not in text:
+            text = text.replace("Perfecto", "Pretérito Perfecto Compuesto")
+        if "Indefinido" in text and "Simple" not in text:
+            text = text.replace("Indefinido", "Pretérito Perfecto Simple")
+    text = text.replace("ultimamente", "últimamente")
+    return text
 
 # =========================
-# BANK ZADAŃ PODSTAWOWYCH
+# BANK ZADAŃ (bazowe zbiory)
 # =========================
-task1 = [
-  {"q":"Ayer yo ___ (comer).","ok":["comí","he comido"],"why":"Forma: pretérito (comí) lub perfecto (he comido)."},
-  {"q":"Ellos ___ (ir) al cine el martes pasado.","ok":["fueron"],"why":"Ir – indefinido: fueron."},
-  {"q":"¿Tú ya ___ (ver) la película?","ok":["has visto","viste"],"why":"Participio irregular: visto."},
-  {"q":"Nosotros ___ (estar) en Madrid w 2019.","ok":["estuvimos"],"why":"Estar – indefinido: estuvimos."},
-  {"q":"María ___ (hacer) la tarea hace una hora.","ok":["hizo"],"why":"Hizo (hacer)."},
-  {"q":"Yo nunca ___ (escribir) cartas.","ok":["he escrito","escribí"],"why":"Participio irregular: escrito."},
-  {"q":"¿Vosotros ___ (poner) la mesa?","ok":["pusisteis","habéis puesto"],"why":"Poner: pusisteis / habéis puesto."},
-  {"q":"Ellas ___ (decir) la verdad.","ok":["dijeron","han dicho"],"why":"Decir: dijeron / han dicho."},
-  {"q":"Yo ___ (tener) un problema en 2005.","ok":["tuve"],"why":"Tener: tuve."},
-  {"q":"Últimamente nosotros ___ (leer) mucho.","ok":["hemos leído"],"why":"Perfecto z 'últimamente'."},
-]
+SIMPLE_MARKERS    = ["ayer", "anteayer", "el martes pasado", "en 2019", "el año pasado"]
+COMPUESTO_MARKERS = ["hoy", "esta semana", "este mes", "ya", "todavía no", "últimamente", "alguna vez"]
+
+def gen_stage1_items():
+    """
+    Marco generuje 5 przykładów:
+    - 3 przykłady Compuesto (haber + participio)
+    - 2 przykłady Simple (formas de indefinido)
+    ZAWSZE zapisujemy oczekiwany czas w polu 'tense' i powód w 'why'.
+    """
+    sujetos = [("yo","comer","he comido","comí"),
+               ("tú","ver","has visto","viste"),
+               ("nosotros","leer","hemos leído","leímos"),
+               ("ellos","ir","han ido","fueron"),
+               ("ella","hacer","ha hecho","hizo"),
+               ("vosotros","poner","habéis puesto","pusisteis"),
+               ("ellas","decir","han dicho","dijeron"),
+               ("yo","escribir","he escrito","escribí"),
+               ("nosotros","estar","hemos estado","estuvimos")]
+
+    random.shuffle(sujetos)
+    comp = random.sample(COMPUESTO_MARKERS, 3)
+    simp = random.sample(SIMPLE_MARKERS, 2)
+
+    def phr(marker, subj, verbo, comp_ok, simp_ok):
+        if marker in COMPUESTO_MARKERS:
+            # Compuesto
+            q = f"{marker.capitalize()} {subj} ___ ({verbo})."
+            ok = [comp_ok]
+            tense = "PPC"  # Pretérito Perfecto Compuesto
+            why = f"Marcador „{marker}” → rama czasowa związana z teraźniejszością/niezakończona → Pretérito Perfecto Compuesto."
+        else:
+            # Simple
+            q = f"{subj.capitalize()} ___ ({verbo}) {marker}."
+            ok = [simp_ok]
+            tense = "PPS"  # Pretérito Perfecto Simple
+            why = f"Marcador „{marker}” → przeszłość odcięta od teraz → Pretérito Perfecto Simple."
+        return {"type":"gap","prompt":q,"answers":ok,"why":why,"tense":tense}
+
+    items = []
+    for m in comp:
+        s = sujetos.pop()
+        items.append(phr(m, *s))
+    for m in simp:
+        s = sujetos.pop()
+        items.append(phr(m, *s))
+    random.shuffle(items)
+    return items[:5]
+
+# --- Ćwiczenie 2: wyrażenia czasu (PL→ES) ---
 task2 = [
   {"pl":"wczoraj","es":["ayer"]},
   {"pl":"przedwczoraj","es":["anteayer"]},
   {"pl":"już","es":["ya"]},
-  {"pl":"jeszcze nie","es":["todavia no","todavía no"]},
+  {"pl":"jeszcze nie","es":["todavía nie","todavia no".replace("nie","no")]},  # poprawka polskiego "nie" -> "no"
   {"pl":"w 2005 roku","es":["en 2005"]},
   {"pl":"w zeszły wtorek","es":["el martes pasado"]},
   {"pl":"tydzień temu","es":["hace una semana"]},
@@ -180,7 +243,9 @@ task2 = [
   {"pl":"kiedykolwiek","es":["alguna vez"]},
   {"pl":"ostatnio","es":["últimamente","ultimamente"]},
 ]
-task3 = [  # 8 zdań
+
+# --- Ćwiczenie 3: duele/duelen, tener dolor de (PL→ES/gap) ---
+task3 = [
   {"q":"A mí me ___ la cabeza.","ok":["duele"],"why":"Singular: duele + la cabeza."},
   {"q":"A ellos les ___ los pies.","ok":["duelen"],"why":"Plural: duelen + los pies."},
   {"q":"Tengo ___ de estómago.","ok":["dolor"],"why":"Tener dolor de + parte del cuerpo."},
@@ -190,16 +255,20 @@ task3 = [  # 8 zdań
   {"q":"Mi hermano está ___ (chory).","ok":["enfermo","resfriado"],"why":"Estar enfermo/resfriado."},
   {"q":"A ti te ___ la espalda.","ok":["duele"],"why":"Singular: duele + la espalda."},
 ]
+
+# --- Ćwiczenie 4: Imperativo (vosotros) ---
 task4 = [
   {"q":"(vosotros) hablar → ___","ok":["hablad"],"why":"-ar → -ad"},
   {"q":"(vosotros) comer → ___","ok":["comed"],"why":"-er → -ed"},
   {"q":"(vosotros) abrir → ___","ok":["abrid"],"why":"-ir → -id"},
-  {"q":"(vosotros, refl.) levantarse → ___","ok":["levantaos"],"why":"afirmativo reflexivo: -aos/-eos/-ios"},
-  {"q":"(vosotros, refl.) ponerse → ___","ok":["poneos"],"why":"poneos (no *poneros*)."},
+  {"q":"(vosotros, refl.) levantarse → ___","ok":["levantaos"],"why":"reflexivo afirm.: -aos/-eos/-ios"},
+  {"q":"(vosotros, refl.) ponerse → ___","ok":["poneos"],"why":"poneos (nie 'poneros')."},
   {"q":"(vosotros, refl.) sentarse → ___","ok":["sentaos"],"why":"reflexivo -ar: -aos."},
-  {"q":"(vosotros) irse → ___","ok":["idos","iros"],"why":"RAE: idos; aceptado iros."},
+  {"q":"(vosotros) irse → ___","ok":["idos","iros"],"why":"RAE: 'idos'; akceptowane 'iros'."},
   {"q":"(vosotros) hacer → ___","ok":["haced"],"why":"Imperativo regular: haced."},
 ]
+
+# --- Ćwiczenie 5: części ciała (PL→ES) ---
 task5 = [
   {"es":"la cabeza","pl":["głowa"]},
   {"es":"la oreja","pl":["ucho","uszy"]},
@@ -219,76 +288,57 @@ task5 = [
 ]
 
 # =========================
-# ĆWICZENIA – DEFINICJE (mix typów)
+# ĆWICZENIA – DEFINICJE (dokładnie 5 pozycji każde)
 # =========================
-# typy: "gap" -> wpisz; "translate" -> wpisz; "mc" -> wielokrotnego wyboru (radio 1 z 3)
-exercises = {
-  1: {
-    "title": "Ćwiczenie 1 — Czas przeszły: Perfecto vs Indefinido",
-    "ask": "Escribe la forma correcta",
-    "items": (
-      [{"type":"gap","prompt":x["q"],"answers":x["ok"],"why":x["why"]} for x in task1] + [
-        {"type":"mc","prompt":"Marker czasu dla Perfecto to…",
-         "options":["ayer","el martes pasado","ya"],"correct":["ya"]},
-        {"type":"mc","prompt":"Wybierz formę Indefinido (3. os. lm.) dla 'ir'",
-         "options":["iban","fueron","van"],"correct":["fueron"]},
-      ])
-  },
-  2: {
-    "title": "Ćwiczenie 2 — Wyrażenia czasu (PL → ES)",
-    "ask": "Traduce al español",
-    "items": (
-      [{"type":"translate","prompt":f"„{x['pl']}”","answers":x["es"]} for x in task2] + [
-        {"type":"mc","prompt":"„ostatnio” pasuje zwykle do…",
-         "options":["Perfecto","Indefinido","Futuro"],"correct":["Perfecto"]},
-        {"type":"mc","prompt":"„el martes pasado” to zwykle…",
-         "options":["Perfecto","Indefinido","Presente"],"correct":["Indefinido"]},
-      ])
-  },
-  3: {
-    "title": "Ćwiczenie 3 — duele/duelen, tener dolor de, objawy",
-    "ask": "Completa",
-    "items": (
-      [{"type":"gap","prompt":x["q"],"answers":x["ok"],"why":x["why"]} for x in task3] + [
-        {"type":"mc","prompt":"A mí me ___ los ojos.",
-         "options":["duele","duelen","dolor"],"correct":["duelen"]},
-        {"type":"mc","prompt":"Tengo ___ de cabeza.",
-         "options":["duelen","dolor","duele"],"correct":["dolor"]},
-      ])
-  },
-  4: {
-    "title": "Ćwiczenie 4 — Imperativo (vosotros, afirmativo)",
-    "ask": "Imperativo (vosotros)",
-    "items": (
-      [{"type":"gap","prompt":x["q"],"answers":x["ok"],"why":x["why"]} for x in task4] + [
-        {"type":"mc","prompt":"(vosotros, refl.) ponerse → ?",
-         "options":["poneros","poneos","ponéos"],"correct":["poneos"]},
-        {"type":"mc","prompt":"(vosotros) comer → ?",
-         "options":["comed","comeis","comes"],"correct":["comed"]},
-      ])
-  },
-  5: {
-    "title": "Ćwiczenie 5 — Części ciała (PL → ES)",
-    "ask": "Przetłumacz na hiszpański",
-    "items": (
-      [{"type":"translate","prompt":x["pl"][0], "answers":[x["es"]]} for x in task5] + [
-        {"type":"mc","prompt":"„nogi” po hiszpańsku to…",
-         "options":["los pies","las piernas","los brazos"],"correct":["las piernas"]},
-        {"type":"mc","prompt":"„usta” po hiszpańsku to…",
-         "options":["la boca","la cara","la nariz"],"correct":["la boca"]},
-      ])
-  }
-}
+def pick5(lst):
+    return random.sample(lst, 5)
+
+def build_exercises():
+    return {
+      1: {
+        "title": "Ćwiczenie 1 — Pretérito Perfecto Simple vs Pretérito Perfecto Compuesto",
+        "ask": "",
+        "items": gen_stage1_items()
+      },
+      2: {
+        "title": "Ćwiczenie 2 — Wyrażenia czasu (PL → ES)",
+        "ask": "",
+        "items": [{"type":"translate","prompt":f"„{x['pl']}”","answers":x["es"]} for x in pick5(task2)]
+      },
+      3: {
+        "title": "Ćwiczenie 3 — duele/duelen, tener dolor de, objawy",
+        "ask": "",
+        "items": [{"type":"gap","prompt":x["q"],"answers":x["ok"],"why":x["why"]} for x in pick5(task3)]
+      },
+      4: {
+        "title": "Ćwiczenie 4 — Imperativo (vosotros, afirmativo)",
+        "ask": "",
+        "items": [{"type":"gap","prompt":x["q"],"answers":x["ok"],"why":x["why"]} for x in pick5(task4)]
+      },
+      5: {
+        "title": "Ćwiczenie 5 — Części ciała (PL → ES)",
+        "ask": "",
+        "items": [{"type":"translate","prompt":x["pl"][0], "answers":[x["es"]]} for x in pick5(task5)]
+      }
+    }
+
+# dynamiczny stan ćwiczeń (po „Nowe przykłady”)
+if "dynamic_exercises" not in st.session_state:
+    st.session_state.dynamic_exercises = build_exercises()
+
+def reset_stage_items(stage:int):
+    base = build_exercises()
+    st.session_state.dynamic_exercises[stage]["items"] = base[stage]["items"]
 
 # =========================
-# TEST – generator (jak wcześniej)
+# TEST – generator (losowy zestaw przy każdym uruchomieniu)
 # =========================
 def build_test_items():
     items=[]
-    for i in [0,1,2,3,4]:
-        items.append({"type":"gap", "prompt":task1[i]["q"], "answers":task1[i]["ok"]})
-    for i in [0,2,3,5]:
-        items.append({"type":"translate", "prompt":f"Przetłumacz na hiszpański: „{task2[i]['pl']}”", "answers":task2[i]["es"]})
+    for it in gen_stage1_items():
+        items.append({"type":"gap","prompt":it["prompt"],"answers":it["answers"]})
+    for x in random.sample(task2, 4):
+        items.append({"type":"translate", "prompt":f"Przetłumacz na hiszpański: „{x['pl']}”", "answers":x["es"]})
     items += [
       {"type":"mc", "prompt":"Wybierz poprawne: A mí me ___ la cabeza.",
        "options":["duelen","duele","dolor"], "correct":["duele"]},
@@ -298,21 +348,13 @@ def build_test_items():
        "options":["duele","duelen","dolor"], "correct":["dolor"]},
     ]
     mc_more = [
-      ("Marker czasu dla Perfecto to…", ["ayer","el martes pasado","ya"], ["ya"]),
-      ("Wybierz formę Indefinido dla 'ir' (3 os. l.mn.)", ["van","fueron","iban"], ["fueron"]),
-      ("Participio de 'ver' to…", ["visto","vido","visto/a"], ["visto"]),
-      ("Vosotros (imperativo) de 'comer' to…", ["comed","comeis","comes"], ["comed"]),
-      ("Doler (mnoga) z 'los ojos':", ["me duele los ojos","me duelen los ojos","tengo dolor los ojos"], ["me duelen los ojos"]),
-      ("Tener + symptom: poprawne to…", ["tengo tos","estoy tos","soy tos"], ["tengo tos"]),
-      ("'w 2005 roku' po hiszpańsku:", ["en 2005","a 2005","del 2005"], ["en 2005"]),
-      ("'kiedykolwiek' po hiszpańsku:", ["alguna vez","nunca","jamás"], ["alguna vez"]),
-      ("Vosotros (refl.) ponerse – imperativo:", ["poneros","poneos","ponéos"], ["poneos"]),
-      ("Marker Indefinido:", ["últimamente","ya","el martes pasado"], ["el martes pasado"]),
+      ("Marcador típico del Compuesto:", ["ayer","el año pasado","ya"], ["ya"]),
+      ("Marcador típico del Simple:", ["esta semana","hoy","el martes pasado"], ["el martes pasado"]),
     ]
     for q, opts, corr in mc_more:
         items.append({"type":"mc","prompt":q,"options":opts,"correct":corr})
-    for i in [0,7,14]:
-        items.append({"type":"translate", "prompt":f"Przetłumacz na polski: „{task5[i]['es']}”", "answers":task5[i]["pl"]})
+    for x in random.sample(task5, 3):
+        items.append({"type":"translate", "prompt":f"Przetłumacz na polski: „{x['es']}”", "answers":x["pl"]})
     return items
 
 if "test_items" not in st.session_state:
@@ -325,10 +367,11 @@ if "test_score" not in st.session_state:
     st.session_state.test_score = 0
 
 # =========================
-# UI – WYŚWIETLANIE WIADOMOŚCI
+# UI – WYŚWIETLANIE WIADOMOŚCI (z recenzentem)
 # =========================
 def add_msg(role: str, text: str):
-    st.session_state.chat.append((role, text))
+    checked = review_message(role, text)
+    st.session_state.chat.append((role, checked))
 
 def render_history():
     css_class = stage_css()
@@ -355,7 +398,19 @@ def mario_ask(text: str):
     with st.chat_message("assistant", avatar="🇪🇸"):
         ph = st.empty()
         name = st.session_state.tutor_name
-        type_out(ph, f"{name}:", text, css_class, speed=st.session_state.typing_speed)
+        to_show = review_message("mario", text)
+        typed=""
+        for ch in to_show:
+            typed+=ch
+            ph.markdown(
+                f"<div class='chat-bubble {css_class}'><span class='sender'>{name}:</span> "
+                f"<span class='typing-cursor'>{typed}</span></div>", unsafe_allow_html=True
+            )
+            time.sleep(st.session_state.typing_speed)
+        ph.markdown(
+            f"<div class='chat-bubble {css_class}'><span class='sender'>{name}:</span> {to_show}</div>",
+            unsafe_allow_html=True
+        )
     add_msg("mario", text)
     st.session_state.pending_question = True
 
@@ -363,7 +418,7 @@ def asystent_once(text: str):
     add_msg("asystent", text)
 
 def stage_transition_back_to_menu():
-    time.sleep(2.0)
+    time.sleep(0.6)
     rotate_tutor_name()
     st.session_state.mode = "menu"
     st.session_state.idx = 0
@@ -372,136 +427,167 @@ def stage_transition_back_to_menu():
     st.rerun()
 
 # =========================
-# EKRAN STARTOWY (wybór ćwiczeń, test, teoria)
+# TEORIA (rozszerzona i doprecyzowana)
 # =========================
 theory_text = {
-  1: "- **Indefinido**: zakończone fakty (ayer, el martes pasado, en 2019).\n- **Perfecto**: doświadczenie/ciągłość do dziś (ya, todavía no, últimamente) = **haber + participio**.",
-  2: "- **Markery czasu**: *ayer, anteayer, ya, todavía no, el martes pasado, hace una semana, últimamente…*",
-  3: "- **doler**: *me duele* (l.poj.) / *me duelen* (l.mn.).\n- **tener + symptom**: *tener tos / fiebre / gripe*; **tener dolor de** + część ciała.",
-  4: "- **Imperativo vosotros**: -ad / -ed / -id; formy zwrotne: -aos / -eos / -ios (np. **poneos**).",
-  5: "- **Partes del cuerpo**: *la cabeza, los ojos, la nariz, la boca, las manos, las piernas…*"
+  1: (
+    "- ## Pretérito Perfecto Simple (PPS) vs Pretérito Perfecto Compuesto (PPC)\n"
+    "### Kiedy PPS?\n"
+    "- Zdarzenia zakończone w przeszłości, odcięte od chwili obecnej.\n"
+    "- Typowe marcadores: ayer, anteayer, el martes pasado, en 2019, el año pasado, hace una semana.\n"
+    "- Przykłady: Ayer fuimos al cine. / En 2019 estuvimos en Madrid.\n\n"
+    "### Kiedy PPC? (wariant Hiszpanii)\n"
+    "- Doświadczenia lub zdarzenia w ramach czasowych niezakończonych (hoy, esta semana, este mes, este año) lub z wiązaną teraźniejszością (ya, todavía no, últimamente, alguna vez).\n"
+    "- Budowa: haber (he, has, ha, hemos, habéis, han) + participio (he comido, has visto, han dicho...).\n"
+    "- Przykłady: Hoy he comido tarde. / ¿Ya has visto la película? / Últimamente hemos leído mucho.\n\n"
+    "### Uwaga dialektalna\n"
+    "- W Ameryce Łacińskiej częściej używa się form Simple tam, gdzie w Hiszpanii pojawia się Compuesto (hoy comí zamiast hoy he comido). W tej aplikacji trzymamy się wariantu Hiszpanii.\n\n"
+    "### Participios irregulares (wybór)\n"
+    "- abrir → abierto, decir → dicho, escribir → escrito, hacer → hecho, poner → puesto, ver → visto, volver → vuelto, romper → roto\n\n"
+    "### Tłumaczenia (PL → wybór czasu)\n"
+    "- „Dzisiaj jadłem późno” → PPC (Hoy he comido tarde).\n"
+    "- „W zeszły wtorek byliśmy w kinie” → PPS (El martes pasado fuimos al cine).\n"
+    "- „Już to widziałaś?” → PPC (¿Ya lo has visto?).\n"
+    "- „W 2019 roku mieszkaliśmy w…” → PPS (En 2019 vivimos/estuvimos en…).\n"
+    "- „Ostatnio dużo czytamy” → PPC (Últimamente hemos leído mucho).\n\n"
+    "### Typowe błędy i wskazówki\n"
+    "- Nie mieszaj PPS i PPC w jednym zdaniu, gdy marker jasno wskazuje ramę: Esta semana he estudiado (PPC), ale la semana pasada estudié (PPS).\n"
+    "- Ya i todavía no prawie zawsze pchają do PPC w wariancie Hiszpanii.\n"
+    "- Hace + periodo zwykle łączy się z PPS (Hace dos días vi a Ana).\n"
+  ),
+  2: (
+    "- Marcadores czasu (PL→ES) i powiązania z czasami:\n"
+    "  - wczoraj → ayer (PPS), przedwczoraj → anteayer (PPS), już → ya (PPC), jeszcze nie → todavía no (PPC),\n"
+    "  - w zeszły wtorek → el martes pasado (PPS), ostatnio → últimamente (PPC)."
+  ),
+  3: "- doler: me duele (l.poj.) / me duelen (l.mn.). tener + symptom; tener dolor de + część ciała.",
+  4: "- Imperativo vosotros: -ad / -ed / -id; zwrotne: -aos / -eos / -ios (np. poneos).",
+  5: "- Partes del cuerpo: la cabeza, los ojos, la nariz, la boca, las manos, las piernas…"
 }
 
+# =========================
+# MENU
+# =========================
 def show_menu():
-    # ===== kolorowy baner =====
     st.markdown(
         """
         <div class="hero">
           <h2>🌶️ <em>Español • Unidad 1</em>!</h2>
-          <p>Wybierz ćwiczenie, przeczytaj teorię albo zrób test.¡Vamos! 🇪🇸</p>
+          <p>Wybierz ćwiczenie, przeczytaj teorię albo zrób test. ¡Vamos! 🇪🇸</p>
         </div>
         """,
         unsafe_allow_html=True
     )
 
-    # ===== Ćwiczenia =====
     st.markdown('<div class="section-title">🎯 Wybierz ćwiczenie</div>', unsafe_allow_html=True)
     c1, c2, c3, c4, c5 = st.columns(5)
 
     with c1:
-        st.markdown('<div class="card card-blue">🌀<h4>Ćw. 1</h4><p>Perfecto vs Indefinido — wpisz poprawną formę.</p>', unsafe_allow_html=True)
+        st.markdown('<div class="card card-blue">🌀<h4>Ćw. 1</h4><p>Pretérito Perfecto Simple vs Compuesto — forma z kontekstu i markerów.</p>', unsafe_allow_html=True)
         if st.button("Start →", key="ex1"):
             st.session_state.mode="ex"; st.session_state.stage=1; st.session_state.idx=0
-            st.session_state.chat=[]
-            set_tutor_for_stage(1)  # <<< DODANE
-            asystent_once(exercises[1]["title"]); st.rerun()
+            st.session_state.chat=[]; set_tutor_for_stage(1)
+            st.session_state.dynamic_exercises[1]["items"] = gen_stage1_items()
+            asystent_once(st.session_state.dynamic_exercises[1]["title"]); st.rerun()
         st.markdown("</div>", unsafe_allow_html=True)
 
     with c2:
-        st.markdown('<div class="card card-green">⏱️<h4>Ćw. 2</h4><p>Wyrażenia czasu (PL → ES) — tłumaczenia + pytania MC.</p>', unsafe_allow_html=True)
+        st.markdown('<div class="card card-green">⏱️<h4>Ćw. 2</h4><p>Wyrażenia czasu (PL → ES) — 5 szybkich tłumaczeń.</p>', unsafe_allow_html=True)
         if st.button("Start →", key="ex2"):
             st.session_state.mode="ex"; st.session_state.stage=2; st.session_state.idx=0
-            st.session_state.chat=[]
-            set_tutor_for_stage(2)  # <<< DODANE
-            asystent_once(exercises[2]["title"]); st.rerun()
+            st.session_state.chat=[]; set_tutor_for_stage(2)
+            reset_stage_items(2)
+            asystent_once(st.session_state.dynamic_exercises[2]["title"]); st.rerun()
         st.markdown("</div>", unsafe_allow_html=True)
 
     with c3:
-        st.markdown('<div class="card card-orange">🩺<h4>Ćw. 3</h4><p><em>duele/duelen</em>, <em>tener dolor de</em>, objawy — uzupełnij i wybierz.</p>', unsafe_allow_html=True)
+        st.markdown('<div class="card card-orange">🩺<h4>Ćw. 3</h4><p>duele/duelen, tener dolor de — 5 uzupełnień.</p>', unsafe_allow_html=True)
         if st.button("Start →", key="ex3"):
             st.session_state.mode="ex"; st.session_state.stage=3; st.session_state.idx=0
-            st.session_state.chat=[]
-            set_tutor_for_stage(3)  # <<< DODANE
-            asystent_once(exercises[3]["title"]); st.rerun()
+            st.session_state.chat=[]; set_tutor_for_stage(3)
+            reset_stage_items(3)
+            asystent_once(st.session_state.dynamic_exercises[3]["title"]); st.rerun()
         st.markdown("</div>", unsafe_allow_html=True)
 
     with c4:
-        st.markdown('<div class="card card-violet">🗣️<h4>Ćw. 4</h4><p>Imperativo (vosotros) — formy i zwrotne.</p>', unsafe_allow_html=True)
+        st.markdown('<div class="card card-violet">🗣️<h4>Ćw. 4</h4><p>Imperativo (vosotros) — 5 form do wpisania.</p>', unsafe_allow_html=True)
         if st.button("Start →", key="ex4"):
             st.session_state.mode="ex"; st.session_state.stage=4; st.session_state.idx=0
-            st.session_state.chat=[]
-            set_tutor_for_stage(4)  # <<< DODANE
-            asystent_once(exercises[4]["title"]); st.rerun()
+            st.session_state.chat=[]; set_tutor_for_stage(4)
+            reset_stage_items(4)
+            asystent_once(st.session_state.dynamic_exercises[4]["title"]); st.rerun()
         st.markdown("</div>", unsafe_allow_html=True)
 
     with c5:
-        st.markdown('<div class="card card-pink">🧠<h4>Ćw. 5</h4><p>Części ciała (PL → ES) — tłumaczenia + pytania MC.</p>', unsafe_allow_html=True)
+        st.markdown('<div class="card card-pink">🧠<h4>Ćw. 5</h4><p>Części ciała (PL → ES) — 5 słówek.</p>', unsafe_allow_html=True)
         if st.button("Start →", key="ex5"):
             st.session_state.mode="ex"; st.session_state.stage=5; st.session_state.idx=0
-            st.session_state.chat=[]
-            set_tutor_for_stage(5)  # <<< DODANE
-            asystent_once(exercises[5]["title"]); st.rerun()
+            st.session_state.chat=[]; set_tutor_for_stage(5)
+            reset_stage_items(5)
+            asystent_once(st.session_state.dynamic_exercises[5]["title"]); st.rerun()
         st.markdown("</div>", unsafe_allow_html=True)
 
     st.markdown("---")
-
-    # ===== Teoria =====
     st.markdown('<div class="section-title">📚 Teoria</div>', unsafe_allow_html=True)
     t1, t2, t3, t4, t5 = st.columns(5)
-    theory_labels = ["Teoria 1", "Teoria 2", "Teoria 3", "Teoria 4", "Teoria 5"]
-    theory_icons  = ["📜","📜","📜","📜","📜"]
     for i, col in enumerate([t1,t2,t3,t4,t5], start=1):
         with col:
-            st.markdown(f'<div class="card card-theory">{theory_icons[i-1]}<h4>{theory_labels[i-1]}</h4><p>Najważniejsze zasady z działu {i}.</p>', unsafe_allow_html=True)
+            st.markdown(f'<div class="card card-theory">📜<h4>Teoria {i}</h4><p>Najważniejsze zasady z działu {i}.</p>', unsafe_allow_html=True)
             if st.button("Czytaj →", key=f"th{i}"):
                 st.session_state.mode="theory"; st.session_state.selected_theory=i; st.rerun()
             st.markdown("</div>", unsafe_allow_html=True)
 
     st.markdown("---")
-
-    # ===== Test =====
     st.markdown('<div class="section-title">🧪 Test</div>', unsafe_allow_html=True)
     cta = st.container()
     with cta:
-        st.markdown('<div class="card card-test">🚀<h4>Test sprawdzający</h4><p>Mieszanka 25+ pytań: uzupełnianie, tłumaczenia i wielokrotnego wyboru.</p>', unsafe_allow_html=True)
+        st.markdown('<div class="card card-test">🚀<h4>Test sprawdzający</h4><p>Mieszanka: uzupełnianie, tłumaczenia, wielokrotny wybór.</p>', unsafe_allow_html=True)
         if st.button("Zacznij test →", key="test_start"):
             st.session_state.mode="test"
             st.session_state.chat=[]
-            add_msg("asystent","Test z działu 1. Kliknij **Zakończ test** na końcu.")
+            # usunięto ** z komunikatu asystenta
+            add_msg("asystent","Test z działu 1. Kliknij Zakończ test na końcu.")
             st.rerun()
         st.markdown("</div>", unsafe_allow_html=True)
 
-
 # =========================
-# SILNIK ĆWICZEŃ (mix typów)
+# SILNIK ĆWICZEŃ (5 pozycji + przyciski końcowe)
 # =========================
 def render_exercise():
     render_history()
 
-    ex = exercises[st.session_state.stage]
+    ex = st.session_state.dynamic_exercises[st.session_state.stage]
     items = ex["items"]
 
-    # koniec ćwiczenia
     if st.session_state.idx >= len(items):
-        add_msg("asystent", "Koniec ćwiczenia. Brawo! Wróć do menu i wybierz kolejne zadanie lub test. 🎯")
+        add_msg("asystent", "Koniec ćwiczenia. Brawo! 🎯 Wybierz, co dalej.")
         render_history()
-        if st.button("↩️ Wróć do menu"):
-            stage_transition_back_to_menu()
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("↩️ Wróć do menu"):
+                stage_transition_back_to_menu()
+        with col2:
+            if st.button("✨ Nowe przykłady"):
+                if st.session_state.stage == 1:
+                    st.session_state.tutor_name = "Marco"
+                reset_stage_items(st.session_state.stage)
+                st.session_state.idx = 0
+                st.session_state.chat = []
+                st.session_state.pending_question = False
+                asystent_once(st.session_state.dynamic_exercises[st.session_state.stage]["title"])
+                st.rerun()
         return
 
     item = items[st.session_state.idx]
     ask_prompt = ex["ask"]
 
-    # pytanie – tylko jeśli jeszcze nie zadane
     if not st.session_state.pending_question:
         if item["type"] in ("gap","translate"):
-            # tekstowe
-            q = f"{qnum()}. {ask_prompt}: {item['prompt']}"
-        else:  # mc
+            q = f"{qnum()}. {item['prompt']}"
+        else:
             q = f"{qnum()}. {item['prompt']}"
         mario_ask(q)
 
-    # odbiór odpowiedzi
     if item["type"] in ("gap","translate"):
         ans = st.chat_input("Twoja odpowiedź…", key=f"ans_{st.session_state.stage}_{st.session_state.idx}")
         if not ans:
@@ -514,22 +600,30 @@ def render_exercise():
             st.rerun()
 
         good = normalize(ans) in [normalize(x) for x in item["answers"]]
-        if good:
-            add_msg("asystent", random.choice(["Świetnie! ✅","Elegancko! ✅","Git! ✅"]))
-        else:
-            hint = item.get("why")
-            if hint:
-                # Ćw.2 bez emotek
-                add_msg("asystent", short_explain(hint) if st.session_state.stage != 2 else hint)
-            else:
-                # Ćw.5: pokaż poprawne po HISZPAŃSKU
-                if st.session_state.stage == 5:
-                    add_msg("asystent", f"Nie tak. Poprawnie po hiszpańsku: {item['answers'][0]}.")
-                else:
-                    add_msg("asystent", f"Nie tak. Poprawnie: {item['answers'][0]}.")
-            st.session_state.mistakes.append((st.session_state.stage, st.session_state.idx, ans, item["answers"][0]))
 
-        time.sleep(1.0)
+        if st.session_state.stage == 1:
+            tense_full = "Pretérito Perfecto Compuesto" if item.get("tense")=="PPC" else "Pretérito Perfecto Simple"
+            correct_form = item["answers"][0]
+            reason = item.get("why","")
+            if good:
+                add_msg("asystent", f"Dobrze. Oczekiwany czas: {tense_full}. {reason} Poprawna forma to {correct_form} (i takiej użyłaś/eś).")
+            else:
+                add_msg("asystent", f"Oczekiwany czas: {tense_full}. {reason} Poprawna forma: {correct_form}.")
+        else:
+            if good:
+                add_msg("asystent", random.choice(["Świetnie! ✅","Elegancko! ✅","Git! ✅"]))
+            else:
+                hint = item.get("why")
+                if hint:
+                    add_msg("asystent", short_explain(hint) if st.session_state.stage != 2 else hint)
+                else:
+                    if st.session_state.stage == 5:
+                        add_msg("asystent", f"Nie tak. Poprawnie po hiszpańsku: {item['answers'][0]}.")
+                    else:
+                        add_msg("asystent", f"Nie tak. Poprawnie: {item['answers'][0]}.")
+                st.session_state.mistakes.append((st.session_state.stage, st.session_state.idx, ans, item["answers"][0]))
+
+        time.sleep(0.6)
         st.session_state.idx += 1
         st.session_state.pending_question = False
         st.rerun()
@@ -537,28 +631,23 @@ def render_exercise():
     else:  # MC
         key = f"mc_{st.session_state.stage}_{st.session_state.idx}"
         choice = st.radio("Wybierz:", item["options"], index=None, key=key)
-        if choice is None:  # jeszcze nic nie wybrano
+        if choice is None:
             return
         add_msg("user", choice)
         good = choice in item["correct"]
         if good:
             add_msg("asystent", random.choice(["Dobrze! ✅","Tak jest! ✅","Super! ✅"]))
         else:
-            # Ćw.2 bez emotek
-            add_msg("asystent",
-                    f"Nie tak. Poprawnie: {', '.join(item['correct'])}"
-                    if st.session_state.stage == 2 else
-                    f"Nie tak. Poprawnie: {', '.join(item['correct'])}")
+            add_msg("asystent", f"Nie tak. Poprawnie: {', '.join(item['correct'])}")
             st.session_state.mistakes.append((st.session_state.stage, st.session_state.idx, choice, item["correct"][0]))
-        time.sleep(2.0)
+        time.sleep(0.8)
         st.session_state.idx += 1
         st.session_state.pending_question = False
-        # wyczyść wybór, żeby nie przenosił się na następne pytanie
         st.session_state.pop(key, None)
         st.rerun()
 
 # =========================
-# TRYB TESTU (jak wcześniej)
+# TRYB TESTU (losowe przykłady za każdym razem)
 # =========================
 def render_test():
     st.session_state.mode = "test"
@@ -610,12 +699,11 @@ def evaluate_test():
                 mistakes.append((i,it["prompt"], f"Poprawne: {', '.join(it['answers'])}"))
     pct = round(100*good/total)
     theory = (
-        "- **Pretérito Indefinido**: zakończone wydarzenia w przeszłości, często z markerami *ayer, el martes pasado, en 2019*.\n"
-        "- **Pretérito Perfecto**: doświadczenie/ciągłość do dziś, markery *ya, todavía no, últimamente* (+ *haber* + participio).\n"
-        "- **doler**: *me duele* / *me duelen*.\n"
-        "- **tener + symptom**: *tener tos / fiebre / gripe*; *tener dolor de* + część ciała.\n"
-        "- **Imperativo vosotros**: -ad / -ed / -id; zwrotne: -aos / -eos / -ios (np. *poneos*).\n"
-        "- Części ciała: *la cabeza, los ojos, la nariz, la boca, las manos...*"
+        "- Pretérito Perfecto Simple: wydarzenia przeszłe, odcięte od teraz; markery: ayer, el martes pasado, en 2019.\n"
+        "- Pretérito Perfecto Compuesto: doświadczenie/ramy niezakończone; markery: hoy, esta semana, ya, todavía no, últimamente.\n"
+        "- doler: me duele / me duelen; tener + symptom; tener dolor de + część ciała.\n"
+        "- Imperativo vosotros: -ad / -ed / -id; zwrotne: -aos/-eos/-ios (np. poneos).\n"
+        "- Partes del cuerpo: la cabeza, los ojos, la nariz, la boca, las manos..."
     )
     lines=[f"**Wynik:** {pct}% ({good}/{total})", ""]
     if mistakes:
@@ -665,7 +753,6 @@ elif st.session_state.mode == "test" and st.session_state.test_done:
             st.session_state.chat=[]
             st.session_state.mistakes=[]
             st.session_state.pending_question=False
-            # reset imienia na start
             st.session_state.tutor_idx = 0
             st.session_state.tutor_name = st.session_state.tutor_names[0]
             st.rerun()
